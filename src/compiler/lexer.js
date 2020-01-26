@@ -6,7 +6,18 @@ const getColumnNumber = (source, index) =>
 
 const getLineNumber = (source, index) => source.substring(0, index).split("\n").length;
 
-const TokenMatchers = [matchToken(new RegExp("\\s+"), Token.WHITESPACE)];
+const TokenMatchers = [
+  matchToken(new RegExp(`^(${Keyword.join("|")})\\b`), Token.Keyword),
+  matchToken(new RegExp("^[a-zA-Z_][a-zA-Z0-9_]*"), Token.Identifier),
+  matchToken(new RegExp("^(\\d+\\.?\\d*|\\.\\d+)"), Token.Number),
+  matchToken(new RegExp("^\\{"), Token.LeftBrace),
+  matchToken(new RegExp("^\\("), Token.LeftParen),
+  matchToken(new RegExp("^\\."), Token.Period),
+  matchToken(new RegExp("^\\}"), Token.RightBrace),
+  matchToken(new RegExp("^\\)"), Token.RightParen),
+  matchToken(new RegExp("^;"), Token.Semicolon),
+  matchToken(new RegExp("^\\s+"), Token.Whitespace)
+];
 
 function matchToken(regex, token) {
   return (source, index) => {
@@ -27,6 +38,7 @@ export function tokenize(source) {
   let index = 0;
 
   while (index < source.length) {
+    // eslint-disable-next-line no-loop-func
     const matches = TokenMatchers.map(m => m(source, index)).filter(f => f);
     if (matches.length === 0)
       throw new LexerError(
@@ -37,7 +49,7 @@ export function tokenize(source) {
         index
       );
 
-    if (matches[0].token !== Token.WHITESPACE) tokens.push({ ...matches[0] });
+    if (matches[0].token !== Token.Whitespace) tokens.push({ ...matches[0] });
     index += matches[0].lexeme.length;
   }
 

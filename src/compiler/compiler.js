@@ -4,6 +4,6 @@ import { generate } from "./generator";
 
 export function compile(source) {
   const tokens = tokenize(source);
-  const ast = parse(tokens);
-  return generate(ast);
+  const parseData = parse(tokens);
+  return generate(parseData);
 }

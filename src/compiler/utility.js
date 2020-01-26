@@ -1,3 +1,7 @@
+export function arraysEqual(arr1, arr2) {
+  return arr1.length === arr2.length && arr1.every((element, index) => element === arr2[index]);
+}
+
 export const save = (function() {
   const a = document.createElement("a");
   a.style = "display: none";

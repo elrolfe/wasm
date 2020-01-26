@@ -2,49 +2,77 @@ import React, { useState } from "react";
 import "./App.scss";
 
 import { compile } from "./compiler/compiler";
-import { save } from "./compiler/save";
+import { save } from "./compiler/utility";
 
 let message;
+let setOutput;
+
+function log(text, clear) {
+  if (clear) message = "";
+  message += `${text}\n`;
+  setOutput(message);
+}
 
 function compileSource(code, setOutput) {
-  message = "Compiling...\n";
-  setOutput(message);
-
+  log("Compiling...", true);
   return new Promise(resolve => {
     resolve(compile(code));
-  }).then(wasm => {
-    message += "Compilation successful\n";
-    setOutput(message);
-
-    return wasm;
-  });
+  })
+    .then(wasm => {
+      log("Compilation successful");
+      return wasm;
+    })
+    .catch(e => {
+      console.log(e);
+      log("Compilation failed!");
+    });
 }
 
 function compileAndRun(code, setOutput) {
   compileSource(code, setOutput)
     .then(wasm => {
-      message += "Instantiating...\n";
-      setOutput(message);
+      log("Instantiating...");
 
-      return WebAssembly.instantiate(wasm, {});
+      return WebAssembly.instantiate(wasm, {
+        system: {
+          output: log
+        }
+      });
     })
     .then(result => {
-      message += "Instantiation complete\n";
-      setOutput(message);
+      log("Instantiation complete");
+
+      return result;
+    })
+    .then(result => {
+      log("Running...\n--------------------\n");
+      result.instance.exports.main();
+      result.instance.exports.test();
+    })
+    .then(() => {
+      log("\n--------------------\nRun completed");
+    })
+    .catch(e => {
+      console.log(e);
+      log("Instantiation failed!");
     });
 }
 
 function compileAndDownload(code, setOutput) {
   compileSource(code, setOutput).then(wasm => {
-    message += "Saving...\n";
+    log("Saving...");
     setOutput(message);
     save(wasm, "module");
   });
 }
 
 function App() {
-  const [code, setCode] = useState("");
-  const [output, setOutput] = useState("");
+  const [code, setCode] = useState(
+    "export main() {\n  system.output(1);\n}\n\nexport test() {\n  system.output(2);\n}\n"
+  );
+  const [output, setOutputFn] = useState("");
+
+  setOutput = setOutputFn;
 
   return (
     <div className="App">
@@ -88,7 +116,7 @@ function App() {
           </div>
           <div className="column">
             <div className="field">
-              <label className="label">Output</label>
+              <label className="label">Output Log</label>
               <div className="control">
                 <textarea rows="20" readOnly className="textarea" value={output}></textarea>
               </div>

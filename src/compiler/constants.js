@@ -1,23 +1,24 @@
-export const Keyword = Object.freeze(["export"]);
+// Keywords
+export const Keyword = Object.freeze(["export", "return"]);
+export const VariableTypeKeyword = Object.freeze(["number"]);
 
 // For debugging purposes, the Token and Type objects are mapped to strings
 // In the future, this may be changed over to numerics
 export const Token = Object.freeze({
+  Colon: "colon",
+  Comment: "comment",
   Identifier: "identifier",
   Keyword: "keyword",
   LeftBrace: "leftBrace",
   LeftParen: "leftParen",
+  MultOp: "multOp",
   Number: "number",
   Period: "period",
   RightBrace: "rightBrace",
   RightParen: "rightParen",
   Semicolon: "semicolon",
+  SumOp: "sumOp",
   Whitespace: "whitespace"
-});
-
-export const Type = Object.freeze({
-  Function: "function",
-  FunctionCall: "functionCall"
 });
 
 export const Wasm = Object.freeze({
@@ -32,10 +33,15 @@ export const Wasm = Object.freeze({
   OpCode: {
     end: 0x0b,
     call: 0x10,
+    return: 0x0f,
     i32: 0x41,
     i64: 0x42,
     f32: 0x43,
-    f64: 0x44
+    f64: 0x44,
+    f32_add: 0x92,
+    f32_sub: 0x93,
+    f32_mul: 0x94,
+    f32_div: 0x95
   },
   Section: {
     Custom: 0x00,
@@ -58,4 +64,15 @@ export const Wasm = Object.freeze({
     f64: 0x7c
   },
   Version: [0x01, 0x00, 0x00, 0x00]
+});
+
+export const Type = Object.freeze({
+  Function: "function",
+  FunctionCall: "functionCall",
+  ImportFunctionCall: "importFunctionCall",
+  NumberType: Wasm.ValueType.f32,
+  NumericExpression: "numericExpression",
+  NumericConstant: "numericConstant",
+  NumericOperator: "numericOperator",
+  ReturnStatement: "returnStatement"
 });

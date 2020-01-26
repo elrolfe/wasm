@@ -14,26 +14,83 @@ export function generate(parseData) {
     const code = [];
     const locals = [];
 
-    ast.code.forEach(codeStatement => {
-      if (codeStatement.type === Type.FunctionCall) {
-        codeStatement.arguments.forEach(arg => {
-          code.push(Wasm.OpCode.f32);
-          code.push(...encodeFloat32(arg));
-        });
+    function generateExpression(element) {
+      element.expression.forEach(exp => {
+        switch (exp.type) {
+          case Type.NumericConstant:
+            code.push(Wasm.OpCode.f32, ...encodeFloat32(exp.value));
+            break;
 
-        for (let i = 0; i < parseData.functionImports.length; i++) {
-          const { module, identifier } = parseData.functionImports[i];
-          if (codeStatement.module === module && codeStatement.identifier === identifier) {
-            code.push(Wasm.OpCode.call);
-            code.push(...encodeUInt(i));
-            return;
-          }
+          case Type.FunctionCall:
+            generateFunctionCall(exp);
+            break;
+
+          case Type.ImportFunctionCall:
+            generateImportFunctionCall(exp);
+            break;
+
+          case Type.NumericOperator:
+            switch (exp.operator) {
+              case "+":
+                code.push(Wasm.OpCode.f32_add);
+                break;
+
+              case "-":
+                code.push(Wasm.OpCode.f32_sub);
+                break;
+
+              case "*":
+                code.push(Wasm.OpCode.f32_mul);
+                break;
+
+              case "/":
+                code.push(Wasm.OpCode.f32_div);
+                break;
+
+              default:
+                throw new GeneratorError(`Unexpected operator: ${exp.operator}`);
+            }
+            break;
+
+          default:
+            throw new GeneratorError(`Unexpected element in expression: ${exp.type}`);
         }
+      });
+    }
 
-        throw new GeneratorError(
-          `No import found for ${codeStatement.module}.${codeStatement.identifier}`
-        );
+    function generateFunctionCall(element) {
+      if (element.arguments) element.arguments.forEach(arg => generateExpression(arg));
+
+      code.push(Wasm.OpCode.call);
+      code.push(
+        ...encodeUInt(parseData.functionIndex[element.identifier].index + baseFunctionIndex)
+      );
+    }
+
+    function generateImportFunctionCall(element) {
+      if (element.arguments) element.arguments.forEach(arg => generateExpression(arg));
+
+      for (let i = 0; i < parseData.functionImports.length; i++) {
+        const { module, identifier } = parseData.functionImports[i];
+        if (element.module === module && element.identifier === identifier) {
+          code.push(Wasm.OpCode.call);
+          code.push(...encodeUInt(i));
+          return;
+        }
       }
+
+      throw new GeneratorError(`No import found for ${element.module}.${element.identifier}`);
+    }
+
+    function generateReturnStatement(element) {
+      if (element.expression) generateExpression(element.expression);
+    }
+
+    ast.code.forEach(codeStatement => {
+      if (codeStatement.type === Type.FunctionCall) generateFunctionCall(codeStatement);
+      else if (codeStatement.type === Type.ImportFunctionCall)
+        generateImportFunctionCall(codeStatement);
+      else if (codeStatement.type === Type.ReturnStatement) generateReturnStatement(codeStatement);
     });
 
     code.push(Wasm.OpCode.end);

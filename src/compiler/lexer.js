@@ -1,4 +1,4 @@
-import { Keyword, Token } from "./constants";
+import { Keyword, Token, VariableTypeKeyword } from "./constants";
 import { LexerError } from "./exceptions";
 
 const getColumnNumber = (source, index) =>
@@ -8,6 +8,7 @@ const getLineNumber = (source, index) => source.substring(0, index).split("\n").
 
 const TokenMatchers = [
   matchToken(new RegExp(`^(${Keyword.join("|")})\\b`), Token.Keyword),
+  matchToken(new RegExp(`^(${VariableTypeKeyword.join("|")})\\b`), Token.VariableTypeKeyword),
   matchToken(new RegExp("^[a-zA-Z_][a-zA-Z0-9_]*"), Token.Identifier),
   matchToken(new RegExp("^(\\d+\\.?\\d*|\\.\\d+)"), Token.Number),
   matchToken(new RegExp("^\\{"), Token.LeftBrace),
@@ -15,6 +16,11 @@ const TokenMatchers = [
   matchToken(new RegExp("^\\."), Token.Period),
   matchToken(new RegExp("^\\}"), Token.RightBrace),
   matchToken(new RegExp("^\\)"), Token.RightParen),
+  matchToken(new RegExp("^\\/\\/.*"), Token.Comment),
+  matchToken(new RegExp("^\\/\\*[^]*\\*\\/"), Token.Comment),
+  matchToken(new RegExp("^(\\*|/)"), Token.MultOp),
+  matchToken(new RegExp("^(\\+|-)"), Token.SumOp),
+  matchToken(new RegExp("^:"), Token.Colon),
   matchToken(new RegExp("^;"), Token.Semicolon),
   matchToken(new RegExp("^\\s+"), Token.Whitespace)
 ];
@@ -49,7 +55,8 @@ export function tokenize(source) {
         index
       );
 
-    if (matches[0].token !== Token.Whitespace) tokens.push({ ...matches[0] });
+    if (matches[0].token !== Token.Whitespace && matches[0].token !== Token.Comment)
+      tokens.push({ ...matches[0] });
     index += matches[0].lexeme.length;
   }
 

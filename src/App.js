@@ -47,9 +47,8 @@ function compileAndRun(code, setOutput) {
     .then(result => {
       log("Running...\n--------------------\n");
       result.instance.exports.main();
-      result.instance.exports.test();
     })
-    .then(() => {
+    .then(result => {
       log("\n--------------------\nRun completed");
     })
     .catch(e => {
@@ -67,10 +66,9 @@ function compileAndDownload(code, setOutput) {
 }
 
 function App() {
-  const [code, setCode] = useState(
-    "export main() {\n  system.output(1);\n}\n\nexport test() {\n  system.output(2);\n}\n"
-  );
+  const [code, setCode] = useState("export main() {\n  system.output(1 + 1);\n}\n");
   const [output, setOutputFn] = useState("");
+  let upload;
 
   setOutput = setOutputFn;
 
@@ -82,7 +80,15 @@ function App() {
         <div className="columns">
           <div className="column">
             <div className="field">
-              <label className="label">Code</label>
+              <label className="label">
+                Code{" "}
+                <button
+                  className="button is-dark is-small is-outlined"
+                  onClick={() => upload.click()}
+                >
+                  Load Script
+                </button>
+              </label>
               <div className="control">
                 <textarea
                   rows="20"
@@ -129,6 +135,18 @@ function App() {
           </div>
         </div>
       </div>
+      <input
+        type="file"
+        ref={ref => (upload = ref)}
+        style={{ display: "none" }}
+        onChange={({ target }) => {
+          if (target.files.length > 0) {
+            const reader = new FileReader();
+            reader.onload = ({ target }) => setCode(target.result);
+            reader.readAsText(target.files[0]);
+          }
+        }}
+      />
     </div>
   );
 }

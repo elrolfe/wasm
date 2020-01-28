@@ -6,40 +6,59 @@ This is a React project to compile a custom language into a WebAssembly module. 
 
 The following grammar has been implemented to this point:
 
-|           Production |        |                                                                        |
-| -------------------: | :----: | :--------------------------------------------------------------------- |
-|            _Program_ |  ==>   | _Function_ _Program_                                                   |
-|                      | &#124; | &#11401;                                                               |
-|           _Function_ |  ==>   | _ExportFlag_ **_IDENTIFIER_** **(** **)** _FunctionReturn_ _CodeBlock_ |
-|         _ExportFlag_ |  ==>   | **export**                                                             |
-|                      | &#124; | &#11401;                                                               |
-|     _FunctionReturn_ |  ==>   | **:** **_VARIABLE_TYPE_**                                              |
-|                      | &#124; | &#11401;                                                               |
-|          _CodeBlock_ |  ==>   | **{** _BlockStatement_\* **}**                                         |
-|     _BlockStatement_ |  ==>   | _FunctionCall_ **;**                                                   |
-|                      | &#124; | **return** _Expression_ **;**                                          |
-|       _FunctionCall_ |  ==>   | _ModuleIdentifier_ **_IDENTIFIER_** **(** _ExpressionList_ **)**       |
-|   _ModuleIdentifier_ |  ==>   | **_IDENTIFIER_ .**                                                     |
-|                      | &#124; | &#11401;                                                               |
-|     _ExpressionList_ |  ==>   | (_Expression_ (**,** _Expression_)\*)?                                 |
-|         _Expression_ |  ==>   | _NumericExpression_                                                    |
-|                      | &#124; | &#11401;                                                               |
-|  _NumericExpression_ |  ==>   | _Term_ _NumericExpression'_                                            |
-| _NumericExpression'_ |  ==>   | **_SUM_OP_** _Term_ _NumericExpression'_                               |
-|                      | &#124; | &#11401;                                                               |
-|               _Term_ |  ==>   | _Factor_ _Term'_                                                       |
-|              _Term'_ |  ==>   | **_MULT_OP_** _Factor_ _Term'_                                         |
-|             _Factor_ |  ==>   | _FunctionCall_                                                         |
-|                      | &#124; | **(** _NumericExpression_ **)**                                        |
-|                      | &#124; | **_NUMBER_**                                                           |
-|     **_IDENTIFIER_** |  ==>   | **/[a-zA-Z\_][a-za-z0-9\_]\*/**                                        |
-|         **_SUM_OP_** |  ==>   | **+ &#124; -**                                                         |
-|        **_MULT_OP_** |  ==>   | **\* &#124; /**                                                        |
-|         **_NUMBER_** |  ==>   | **(\\d+\\.?\\d\*)&#124;(\\.\\d+)**                                     |
-|  **_VARIABLE_TYPE_** |  ==>   | **number**                                                             |
+|           Production |        |                                                                                        |
+| -------------------: | :----: | :------------------------------------------------------------------------------------- |
+|            _Program_ |  ==>   | _ProgramStatement_ _Program_                                                           |
+|                      | &#124; | &#11401;                                                                               |
+|   _ProgramStatement_ |  ==>   | _Function_                                                                             |
+|                      | &#124; | _VariableDefinition_ **;**                                                             |
+|           _Function_ |  ==>   | _ExportFlag_ **_IDENTIFIER_** **(** _ParameterList_ **)** _FunctionReturn_ _CodeBlock_ |
+|         _ExportFlag_ |  ==>   | **export**                                                                             |
+|                      | &#124; | &#11401;                                                                               |
+|      _ParameterList_ |  ==>   | _Parameter_ _ParameterList'_                                                           |
+|                      | &#124; | &#11401;                                                                               |
+|     _ParameterList'_ |  ==>   | **,** _Parameter_ _ParameterList'_                                                     |
+|          _Parameter_ |  ==>   | **_VARIABLE_TYPE_** **_IDENTIFIER_**                                                   |
+|     _FunctionReturn_ |  ==>   | **:** **_VARIABLE_TYPE_**                                                              |
+|                      | &#124; | &#11401;                                                                               |
+|          _CodeBlock_ |  ==>   | **{** _BlockStatement_\* **}**                                                         |
+|     _BlockStatement_ |  ==>   | _FunctionCall_ **;**                                                                   |
+|                      | &#124; | _VariableDefinition_ **;**                                                             |
+|                      | &#124; | _VariableAssignment_ **;**                                                             |
+|                      | &#124; | **return** _Expression_ **;**                                                          |
+|       _FunctionCall_ |  ==>   | _ModuleIdentifier_ **_IDENTIFIER_** **(** _ArgumentList_ **)**                         |
+|   _ModuleIdentifier_ |  ==>   | **_IDENTIFIER_ .**                                                                     |
+|                      | &#124; | &#11401;                                                                               |
+|       _ArgumentList_ |  ==>   | _Expression_ _ArgumentList'_                                                           |
+|                      | &#124; | &#11401;                                                                               |
+|      _ArgumentList'_ |  ==>   | **,** _Expression_ _ArgumentList'_                                                     |
+|                      | &#124; | &#11401;                                                                               |
+|         _Expression_ |  ==>   | _NumericExpression_                                                                    |
+|  _NumericExpression_ |  ==>   | _Term_ _NumericExpression'_                                                            |
+| _NumericExpression'_ |  ==>   | **_SUM_OP_** _Term_ _NumericExpression'_                                               |
+|                      | &#124; | &#11401;                                                                               |
+|               _Term_ |  ==>   | _Factor_ _Term'_                                                                       |
+|              _Term'_ |  ==>   | **_MULT_OP_** _Factor_ _Term'_                                                         |
+|                      | &#124; | &#11401;                                                                               |
+|             _Factor_ |  ==>   | _FunctionCall_                                                                         |
+|                      | &#124; | **_IDENTIFIER_**                                                                       |
+|                      | &#124; | **(** _NumericExpression_ **)**                                                        |
+|                      | &#124; | **_NUMBER_**                                                                           |
+| _VariableDefinition_ |  ==>   | _ConstantFlag_ **_VARIABLE_TYPE_** **_IDENTIFIER_** _Assignment_                       |
+|       _ConstantFlag_ |  ==>   | **constant**                                                                           |
+|                      | &#124; | &#11401;                                                                               |
+|         _Assignment_ |  ==>   | **=** _Expression_                                                                     |
+|                      | &#124; | &#11401;                                                                               |
+| _VariableAssignment_ |  ==>   | **_IDENTIFIER_** **=** _Expression_                                                    |
+|     **_IDENTIFIER_** |  ==>   | **/[a-zA-Z\_][a-za-z0-9\_]\*/**                                                        |
+|         **_SUM_OP_** |  ==>   | **+ &#124; -**                                                                         |
+|        **_MULT_OP_** |  ==>   | **\* &#124; /**                                                                        |
+|         **_NUMBER_** |  ==>   | **(\\d+\\.?\\d\*)&#124;(\\.\\d+)**                                                     |
+|  **_VARIABLE_TYPE_** |  ==>   | **number**                                                                             |
 
 The tokenizer will match the following tokens:
 
+- Assignment
 - Colon
 - Comment (This token will not be passed on to the parser)
 - Identifier
@@ -96,3 +115,5 @@ or End of Line comments
 // Everything from the beginning double slash
 // to the end of the line is filtered out
 ```
+
+Global and local variables are supported. Global variables can be defined as immutable with the `constant` keyword, and an exception will be thrown if a subsequent assignment to a constant global is attempted. Local variables are always mutable, regardless of the presence of the constant flag in the definition. Local variables may have the same names as defined global variables, and will take precedence over global variables with the same name.

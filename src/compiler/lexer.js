@@ -20,6 +20,8 @@ const TokenMatchers = [
   matchToken(new RegExp("^\\/\\*[^]*\\*\\/"), Token.Comment),
   matchToken(new RegExp("^(\\*|/)"), Token.MultOp),
   matchToken(new RegExp("^(\\+|-)"), Token.SumOp),
+  matchToken(new RegExp("^="), Token.Assignment),
+  matchToken(new RegExp("^,"), Token.Comma),
   matchToken(new RegExp("^:"), Token.Colon),
   matchToken(new RegExp("^;"), Token.Semicolon),
   matchToken(new RegExp("^\\s+"), Token.Whitespace)

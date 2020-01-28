@@ -32,13 +32,14 @@ export function parse(tokens) {
     nextToken = tokenIterator.next().value;
   }
 
-  function addFunctionIndex(name, signature) {
+  function addFunctionIndex(name, parameterList, returnType) {
     if (functionIndex[name] && functionIndex[name].index >= 0)
       throw new ParserError(`Function ${name} has multiple definitions`);
 
     functionIndex[name] = {
       index: Object.entries(functionIndex).filter(([_, value]) => value.index > -1).length,
-      signature
+      parameterList,
+      returnType
     };
   }
 
@@ -46,7 +47,8 @@ export function parse(tokens) {
     if (!functionIndex[name])
       functionIndex[name] = {
         index: -currentToken.line,
-        signature: null
+        parameterList: null,
+        returnType: null
       };
   }
 
@@ -61,6 +63,15 @@ export function parse(tokens) {
 
     functionSignatures.push(signature);
     return functionSignatures.length - 1;
+  }
+
+  function parseAssignment() {
+    try {
+      advance(Token.Assignment);
+      return parseExpression();
+    } catch (err) {
+      return null;
+    }
   }
 
   function parseBlockStatement() {
@@ -80,9 +91,19 @@ export function parse(tokens) {
         default:
           throw unexpectedToken(currentToken, Token.Keyword);
       }
+    } else if (currentToken.token === Token.VariableTypeKeyword) {
+      const statement = parseVariableDefinitionStatement(false);
+      advance(Token.Semicolon);
+
+      return statement;
     } else if (currentToken.token === Token.Identifier) {
       if (nextToken.token === Token.LeftParen || nextToken.token === Token.Period) {
         const statement = parseFunctionCall();
+        advance(Token.Semicolon);
+
+        return statement;
+      } else if (nextToken.token === Token.Assignment) {
+        const statement = parseVariableAssignment();
         advance(Token.Semicolon);
 
         return statement;
@@ -103,6 +124,15 @@ export function parse(tokens) {
     advance();
 
     return blockStatements;
+  }
+
+  function parseConstantFlag() {
+    try {
+      advance(Token.Keyword, "constant");
+      return true;
+    } catch (err) {
+      return false;
+    }
   }
 
   function parseExportFlag() {
@@ -132,7 +162,20 @@ export function parse(tokens) {
         }
       ];
 
-    if (currentToken.token === Token.Identifier) return [parseFunctionCall()];
+    if (currentToken.token === Token.Identifier) {
+      if (nextToken.token === Token.LeftParen) return [parseFunctionCall()];
+      else {
+        const lexeme = currentToken.lexeme;
+        advance();
+
+        return [
+          {
+            type: Type.Variable,
+            identifier: lexeme
+          }
+        ];
+      }
+    }
 
     if (currentToken.token === Token.LeftParen) {
       advance();
@@ -154,40 +197,44 @@ export function parse(tokens) {
 
     advance(Token.LeftParen);
 
-    const argumentList = [];
+    const parameterList = [];
+    while (currentToken.token !== Token.RightParen) {
+      parameterList.push(parseParameter());
+      if (currentToken.token === Token.Comma) advance();
+    }
 
     advance(Token.RightParen);
 
     const returnType = parseFunctionReturn();
 
-    func.typeIndex = functionSignatureIndex(argumentList, returnType);
+    func.typeIndex = functionSignatureIndex(
+      parameterList.map(p => p.type),
+      returnType
+    );
     func.code = parseCodeBlock();
 
-    addFunctionIndex(func.identifier, func.typeIndex);
+    addFunctionIndex(func.identifier, parameterList, returnType);
 
     return func;
   }
 
   function parseFunctionCall() {
-    const functionCall = {};
-    let name = parseIdentifier();
+    const functionCall = {
+      module: parseModuleIdentifier(),
+      identifier: parseIdentifier(),
+      arguments: []
+    };
 
-    if (currentToken.token === Token.Period) {
-      functionCall.type = Type.ImportFunctionCall;
-      functionCall.module = name;
-      advance();
-      name = parseIdentifier();
-    } else {
-      functionCall.type = Type.FunctionCall;
-    }
-
-    functionCall.identifier = name;
+    functionCall.type = functionCall.module ? Type.ImportFunctionCall : Type.FunctionCall;
 
     if (functionCall.type === Type.FunctionCall) addFunctionReference(functionCall.identifier);
 
     advance(Token.LeftParen);
 
-    if (currentToken.token !== Token.RightParen) functionCall.arguments = [parseExpression()];
+    while (currentToken.token !== Token.RightParen) {
+      functionCall.arguments.push(parseExpression());
+      if (currentToken.token === Token.Comma) advance();
+    }
 
     advance(Token.RightParen);
 
@@ -201,11 +248,7 @@ export function parse(tokens) {
       return [];
     }
 
-    if (currentToken.token !== Token.VariableTypeKeyword)
-      throw unexpectedToken(currentToken.token, Token.VariableTypeKeyword);
-
-    advance();
-    return [Wasm.ValueType.f32];
+    return [parseVariableType()];
   }
 
   function parseIdentifier() {
@@ -216,6 +259,17 @@ export function parse(tokens) {
     advance();
 
     return identifier;
+  }
+
+  function parseModuleIdentifier() {
+    if (currentToken.token === Token.Identifier && nextToken.token === Token.Period) {
+      const identifier = parseIdentifier();
+      advance(Token.Period);
+
+      return identifier;
+    }
+
+    return null;
   }
 
   function parseNumber() {
@@ -243,6 +297,35 @@ export function parse(tokens) {
     return expression;
   }
 
+  function parseParameter() {
+    return {
+      type: parseVariableType(),
+      identifier: parseIdentifier()
+    };
+  }
+
+  function parseProgramStatement() {
+    if (currentToken.token === Token.Keyword) {
+      if (currentToken.lexeme === "constant") {
+        const statement = parseVariableDefinitionStatement(true);
+        advance(Token.Semicolon);
+
+        return statement;
+      } else if (currentToken.lexeme === "export") {
+        return parseFunction();
+      }
+    } else if (currentToken.token === Token.Identifier) {
+      return parseFunction();
+    } else if (currentToken.token === Token.VariableTypeKeyword) {
+      const statement = parseVariableDefinitionStatement(true);
+      advance(Token.Semicolon);
+
+      return statement;
+    }
+
+    throw unexpectedToken(currentToken);
+  }
+
   function parseTerm() {
     const expression = [...parseFactor()];
 
@@ -257,6 +340,41 @@ export function parse(tokens) {
     }
 
     return expression;
+  }
+
+  function parseVariableAssignment() {
+    const assignment = {
+      type: Type.VariableAssignment,
+      identifier: parseIdentifier()
+    };
+
+    advance(Token.assignment);
+
+    assignment.expression = parseExpression();
+
+    return assignment;
+  }
+
+  function parseVariableDefinitionStatement(constant) {
+    return {
+      type: Type.VariableDefinition,
+      constant: parseConstantFlag() && constant,
+      variableType: parseVariableType(),
+      identifier: parseIdentifier(),
+      expression: parseAssignment()
+    };
+  }
+
+  function parseVariableType() {
+    if (currentToken.token !== Token.VariableTypeKeyword)
+      throw unexpectedToken(currentToken, Token.VariableTypeKeyword);
+
+    if (currentToken.lexeme === "number") {
+      advance();
+      return Type.NumberType;
+    }
+
+    throw unexpectedToken(currentToken);
   }
 
   const functionSignatures = [];
@@ -278,7 +396,7 @@ export function parse(tokens) {
   let nextToken = tokenIterator.next().value;
 
   while (currentToken) {
-    ast.push(parseFunction());
+    ast.push(parseProgramStatement());
   }
 
   const undefinedFunctions = Object.entries(functionIndex).filter(([_, value]) => value.index < 0);

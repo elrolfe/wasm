@@ -1,4 +1,8 @@
-import { Wasm } from "./constants";
+import { Type, Wasm } from "./constants";
+
+export function encodeBoolean(value) {
+  return value ? encodeInt(1) : encodeInt(0);
+}
 
 export function encodeExportFunction(name, index) {
   return [...encodeString(name), Wasm.ImportExport.Function, ...encodeUInt(index)];
@@ -25,8 +29,10 @@ export function encodeFloat64(n) {
 export function encodeFunctionSignature(argumentList, returnType) {
   return [
     0x60,
-    ...(argumentList && argumentList.length > 0 ? encodeVector(argumentList) : [0x00]),
-    ...(returnType && returnType.length > 0 ? encodeVector(returnType) : [0x00])
+    ...(argumentList && argumentList.length > 0
+      ? encodeVector(argumentList.map(({ variableType }) => typeToValue(variableType)))
+      : [0x00]),
+    ...(returnType ? encodeVector([typeToValue(returnType)]) : [0x00])
   ];
 }
 
@@ -69,4 +75,17 @@ export function encodeUInt(n) {
 
 export function encodeVector(vector) {
   return [...encodeUInt(vector.length), ...vector.flat(Infinity)];
+}
+
+export function typeToValue(t) {
+  switch (t) {
+    case Type.BooleanType:
+      return Wasm.ValueType.i32;
+
+    case Type.NumberType:
+      return Wasm.ValueType.f32;
+
+    default:
+      throw new Error(`Attempted to encode invalid variable type ${t}`);
+  }
 }

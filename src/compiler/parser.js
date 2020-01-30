@@ -1,414 +1,728 @@
-import { Token, Type, Wasm } from "./constants";
+import { Token, Type } from "./constants";
 import { encodeFunctionSignature } from "./encodings";
-import { ParserError } from "./exceptions";
+import { SymbolTable } from "./symbols";
 import { arraysEqual } from "./utility";
 
-function unexpectedToken(receivedToken, wantedToken, wantedLexeme) {
-  const { line, column, token, lexeme } = receivedToken;
+let currentBlock, nextBlock;
+let currentFunction;
+let symbolTable;
+let tokens;
 
-  if (!wantedToken)
-    return new ParserError(
-      `[${line}:${column}] Unexpected token: ${token} (${lexeme})`,
-      receivedToken
-    );
+export function parse(tokenList) {
+  const ast = [];
+  tokens = tokenList;
 
-  const expected = `Wanted ${wantedToken}${wantedLexeme ? ` (${wantedLexeme})` : ""}`;
-  const received = `received ${token} (${lexeme})`;
+  symbolTable = new SymbolTable(tokens);
+  symbolTable.addImportFunction("system", "output", [{ variableType: Type.NumberType }], null);
 
-  return new ParserError(
-    `[${line}:${column}] Unexpected token: ${expected}, ${received}`,
-    receivedToken
-  );
+  // Gather all of the global variable and function symbols
+
+  while (tokens.current()) {
+    symbolParseProgramStatement();
+  }
+
+  tokens.reset();
+
+  // Process the tokens
+  while (tokens.current()) {
+    ast.push(parseProgramStatement());
+  }
+
+  return { ast, symbolTable };
 }
 
-export function parse(tokens) {
-  function advance(token, lexeme) {
-    if (token && currentToken.token !== token) throw unexpectedToken(currentToken, token, lexeme);
+//
+// Parsing Functions
+//
 
-    if (lexeme && currentToken.lexeme !== lexeme)
-      throw unexpectedToken(currentToken, token, lexeme);
-
-    currentToken = nextToken;
-    nextToken = tokenIterator.next().value;
+function parseAssignment(variableType) {
+  // Assignment ==> = Expression
+  try {
+    tokens.advance(Token.Assignment);
+  } catch (err) {
+    return null;
   }
 
-  function addFunctionIndex(name, parameterList, returnType) {
-    if (functionIndex[name] && functionIndex[name].index >= 0)
-      throw new ParserError(`Function ${name} has multiple definitions`);
+  return parseExpression(variableType);
+}
 
-    functionIndex[name] = {
-      index: Object.entries(functionIndex).filter(([_, value]) => value.index > -1).length,
-      parameterList,
-      returnType
-    };
-  }
+function parseBlockStatement() {
+  // BlockStatement ==> FunctionCall ;
+  //                  | VariableDefinition ;
+  //                  | VariableAssignment ;
+  //                  | return Expression ;
+  //                  | if ( BooleanExpression ) CodeBlock ElseBlock
+  let statement;
 
-  function addFunctionReference(name) {
-    if (!functionIndex[name])
-      functionIndex[name] = {
-        index: -currentToken.line,
-        parameterList: null,
-        returnType: null
-      };
-  }
+  switch (tokens.current().token) {
+    case Token.Keyword:
+      switch (tokens.current().lexeme) {
+        case "if": // if ( BooleanExpression ) CodeBlock ElseBlock
+          tokens.advance();
+          tokens.advance(Token.LeftParen);
 
-  function functionSignatureIndex(argumentList, returnType) {
-    const signature = encodeFunctionSignature(argumentList, returnType);
-
-    for (let i = 0; i < functionSignatures.length; i++) {
-      if (arraysEqual(signature, functionSignatures[i])) {
-        return i;
-      }
-    }
-
-    functionSignatures.push(signature);
-    return functionSignatures.length - 1;
-  }
-
-  function parseAssignment() {
-    try {
-      advance(Token.Assignment);
-      return parseExpression();
-    } catch (err) {
-      return null;
-    }
-  }
-
-  function parseBlockStatement() {
-    if (currentToken.token === Token.Keyword) {
-      switch (currentToken.lexeme) {
-        case "return":
-          advance();
-
-          const statement = {
-            type: Type.ReturnStatement,
-            expression: parseExpression()
+          statement = {
+            elementType: Type.IfStatement,
+            expression: parseBooleanExpression()
           };
 
-          advance(Token.Semicolon);
+          tokens.advance(Token.RightParen);
+
+          statement.codeBlock = parseCodeBlock(currentBlock);
+          statement.elseBlock = parseElseBlock();
+
+          return statement;
+
+        case "return": // return Expression ;
+          tokens.advance();
+
+          statement = {
+            elementType: Type.ReturnStatement,
+            expression: parseExpression(symbolTable.getFunction(currentFunction).returnType)
+          };
+          tokens.advance(Token.Semicolon);
+
+          return statement;
+
+        // case "if":  // if ( BooleanExpression ) CodeBlock ElseBlock
+
+        default:
+          throw tokens.unexpected(Token.Keyword);
+      }
+
+    case Token.VariableTypeKeyword: // VariableDefinition ;
+      statement = parseVariableDefinition();
+      symbolTable.addLocalVariable(
+        currentFunction,
+        currentBlock,
+        statement.identifier,
+        statement.variableType
+      );
+
+      tokens.advance(Token.Semicolon);
+
+      return statement;
+
+    case Token.Identifier:
+      switch (tokens.next().token) {
+        case Token.LeftParen: // FunctionCall ;
+        case Token.Period:
+          statement = parseFunctionCall();
+          tokens.advance(Token.Semicolon);
+
+          return statement;
+
+        case Token.Assignment: // VariableAssignment ;
+          statement = parseVariableAssignment();
+          tokens.advance(Token.Semicolon);
+
           return statement;
 
         default:
-          throw unexpectedToken(currentToken, Token.Keyword);
+          throw tokens.unexpected();
       }
-    } else if (currentToken.token === Token.VariableTypeKeyword) {
-      const statement = parseVariableDefinitionStatement(false);
-      advance(Token.Semicolon);
 
-      return statement;
-    } else if (currentToken.token === Token.Identifier) {
-      if (nextToken.token === Token.LeftParen || nextToken.token === Token.Period) {
-        const statement = parseFunctionCall();
-        advance(Token.Semicolon);
+    default:
+      throw tokens.unexpected();
+  }
+}
 
-        return statement;
-      } else if (nextToken.token === Token.Assignment) {
-        const statement = parseVariableAssignment();
-        advance(Token.Semicolon);
+function parseBooleanExpression() {
+  // BooleanExpression ==> BooleanTerm BooleanExpression'
+  const expression = [...parseBooleanTerm()];
 
-        return statement;
-      }
+  // BooleanExpression' ==> || BooleanTerm BooleanExpression'
+  //                     | null
+  while (tokens.current().token === Token.BooleanOp && tokens.current().lexeme === "||") {
+    tokens.advance();
+    expression.push(...parseBooleanTerm());
+    expression.push({
+      elementType: Type.BooleanOperator,
+      operator: "||"
+    });
+  }
+
+  return expression;
+}
+
+function parseBooleanFactor() {
+  // BooleanFactor ==> FunctionCall
+  //                 | IDENTIFIER
+  //                 | ComparisonExpression
+  //                 | ( BooleanExpression )
+  //                 | BOOLEAN_CONSTANT
+
+  // Attempt to match the ComparisonExpression first, as it uses Numeric instead of Boolean types
+  try {
+    tokens.mark(); // Mark where we are in the tokens
+    return parseComparisonExpression();
+  } catch (err) {
+    tokens.reset(); // Rollback to out mark to try for another boolean factor
+
+    switch (tokens.current().token) {
+      case Token.BooleanKeyword: // BOOLEAN_CONSTANT
+        const constant = [
+          {
+            elementType: Type.BooleanConstant,
+            value: tokens.current().lexeme
+          }
+        ];
+        tokens.advance();
+        return constant;
+
+      case Token.Identifier:
+        if (tokens.next().token === Token.LeftParen) {
+          // Function Call
+          return [parseFunctionCall(Type.BooleanType)];
+        } else {
+          // IDENTIFIER (Variable)
+          const variable = symbolTable.getVariable(
+            currentFunction,
+            currentBlock,
+            tokens.current().lexeme
+          );
+          if (variable.variableType !== Type.BooleanType)
+            throw new Error(
+              `[${tokens.current().line}:${tokens.current().column}] Expected variable type ${
+                Type.BooleanType
+              }, ${variable.identifier} is defined as ${variable.variableType}`
+            );
+          tokens.advance();
+
+          return [
+            { elementType: Type.Variable, block: currentBlock, identifier: variable.identifier }
+          ];
+        }
+
+      case Token.LeftParen:
+        tokens.advance();
+        const expression = [...parseBooleanExpression()];
+        tokens.advance(Token.RightParen);
+
+        return expression;
+
+      default:
+        throw tokens.unexpected();
     }
+  }
+}
 
-    throw unexpectedToken(currentToken);
+function parseBooleanNegation() {
+  // BooleanNegation ==> NegationFlag BooleanFactor
+  const negate = parseFlag(Token.NegationOp);
+  const expression = [...parseBooleanFactor()];
+
+  if (negate)
+    expression.push({
+      elementType: Type.BooleanOperator,
+      operator: "!"
+    });
+
+  return expression;
+}
+
+function parseBooleanTerm() {
+  // BooleanTerm ==> BooleanNegation BooleanTerm'
+  const expression = [...parseBooleanNegation()];
+
+  // BooleanTerm' ==> && BooleanNegation BooleanTerm'
+  while (tokens.current().token === Token.BooleanOp && tokens.current().lexeme === "&&") {
+    tokens.advance();
+    expression.push(...parseBooleanNegation());
+    expression.push({
+      elementType: Type.BooleanOperator,
+      operator: "&&"
+    });
   }
 
-  function parseCodeBlock() {
-    const blockStatements = [];
-    advance(Token.LeftBrace);
+  return expression;
+}
 
-    while (currentToken.token !== Token.RightBrace) {
-      blockStatements.push(parseBlockStatement());
-    }
+function parseCodeBlock(parent) {
+  // CodeBlock ==> { BlockStatement* }
+  tokens.advance(Token.LeftBrace);
 
-    advance();
+  const lastBlock = currentBlock;
+  currentBlock = nextBlock++;
 
-    return blockStatements;
+  symbolTable.addLocalBlock(currentFunction, parent);
+  const blockStatements = [];
+
+  while (tokens.current().token !== Token.RightBrace) {
+    blockStatements.push(parseBlockStatement());
   }
 
-  function parseConstantFlag() {
-    try {
-      advance(Token.Keyword, "constant");
-      return true;
-    } catch (err) {
-      return false;
-    }
+  currentBlock = lastBlock;
+
+  tokens.advance(Token.RightBrace);
+
+  return blockStatements;
+}
+
+function parseComparisonExpression() {
+  // ComparisonExpression ==> NumericExpression COMPARISON_OP NumericExpression
+  const expression = [...parseNumericExpression()];
+  const opToken = tokens.advance(Token.ComparisonOp);
+
+  expression.push(...parseNumericExpression());
+  expression.push({
+    elementType: Type.ComparisonOperator,
+    operator: opToken.lexeme
+  });
+
+  return expression;
+}
+
+function parseElseBlock() {
+  // ElseBlock ==> else CodeBlock
+  //             | null
+  try {
+    tokens.advance(Token.Keyword, "else");
+  } catch (err) {
+    return null;
   }
 
-  function parseExportFlag() {
-    try {
-      advance(Token.Keyword, "export");
-      return true;
-    } catch (err) {
-      return false;
-    }
+  return parseCodeBlock(currentBlock);
+}
+
+function parseExpression(expressionType) {
+  // Expression ==> NumericExpression
+  //              | BooleanExpression
+  switch (expressionType) {
+    case Type.BooleanType:
+      return {
+        elementType: Type.BooleanExpression,
+        expression: parseBooleanExpression()
+      };
+
+    case Type.NumberType:
+      return {
+        elementType: Type.NumericExpression,
+        expression: parseNumericExpression()
+      };
+
+    default:
+      throw new Error(
+        `[${tokens.current().line}:${
+          tokens.current().column
+        }] Unknown expression type ${expressionType}`
+      );
   }
+}
 
-  function parseExpression() {
-    // Add checks for non-numeric expressions in the future
-
-    return {
-      type: Type.NumericExpression,
-      expression: parseNumericExpression()
-    };
-  }
-
-  function parseFactor() {
-    if (currentToken.token === Token.Number)
+function parseFactor() {
+  // Factor ==> FunctionCall
+  //          | Identifier
+  //          | ( NumericExpression )
+  //          | Number
+  switch (tokens.current().token) {
+    case Token.Number: // Number
       return [
         {
-          type: Type.NumericConstant,
+          elementType: Type.NumericConstant,
           value: parseNumber()
         }
       ];
 
-    if (currentToken.token === Token.Identifier) {
-      if (nextToken.token === Token.LeftParen) return [parseFunctionCall()];
+    case Token.Identifier:
+      if (tokens.next().token === Token.LeftParen)
+        // FunctionCall
+        return [parseFunctionCall(Type.NumberType)];
       else {
-        const lexeme = currentToken.lexeme;
-        advance();
+        // Identifier
+        const variable = symbolTable.getVariable(
+          currentFunction,
+          currentBlock,
+          tokens.current().lexeme
+        );
+        if (variable.variableType !== Type.NumberType)
+          throw new Error(
+            `[${tokens.current().line}:${tokens.current().column}] Expected variable type ${
+              Type.NumberType
+            }, ${variable.identifier} is defined as ${variable.variableType}`
+          );
+        tokens.advance();
 
         return [
-          {
-            type: Type.Variable,
-            identifier: lexeme
-          }
+          { elementType: Type.Variable, block: currentBlock, identifier: variable.identifier }
         ];
       }
-    }
 
-    if (currentToken.token === Token.LeftParen) {
-      advance();
+    case Token.LeftParen: // ( NumericExpression )
+      tokens.advance();
       const expression = [...parseNumericExpression()];
-      advance(Token.RightParen);
+      tokens.advance(Token.RightParen);
 
       return expression;
-    }
 
-    throw unexpectedToken(currentToken);
+    default:
+      throw tokens.unexpected();
   }
+}
 
-  function parseFunction() {
-    const func = {
-      type: Type.Function,
-      export: parseExportFlag(),
-      identifier: parseIdentifier()
-    };
+function parseFlag(token, lexeme = null) {
+  try {
+    tokens.advance(token, lexeme);
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
 
-    advance(Token.LeftParen);
+function parseFunctionCall(expectedType = null) {
+  // FunctionCall ==> ModuleIdentifier Identifier ( ArgumentList )
+  const functionCall = {
+    nameSpace: parseNameSpace(),
+    identifier: parseIdentifier()
+  };
 
-    const parameterList = [];
-    while (currentToken.token !== Token.RightParen) {
-      parameterList.push(parseParameter());
-      if (currentToken.token === Token.Comma) advance();
-    }
+  const functionDefinition = functionCall.nameSpace
+    ? symbolTable.getImportFunction(functionCall.nameSpace, functionCall.identifier)
+    : symbolTable.getFunction(functionCall.identifier);
 
-    advance(Token.RightParen);
-
-    const returnType = parseFunctionReturn();
-
-    func.typeIndex = functionSignatureIndex(
-      parameterList.map(p => p.type),
-      returnType
+  if (expectedType && expectedType !== functionDefinition.returnType)
+    throw new Error(
+      `[${tokens.current().line}:${
+        tokens.current().column
+      }] Expected return type ${expectedType}, ${functionCall.identifier} returns ${
+        functionDefinition.returnType
+      }`
     );
-    func.code = parseCodeBlock();
 
-    addFunctionIndex(func.identifier, parameterList, returnType);
+  tokens.advance(Token.LeftParen);
 
-    return func;
+  // ArgumentList ==> Expression ArgumentList'
+  //                | null
+  // ArgumentList' ==> , Expression ArgumentList'
+  //                 | null
+  functionCall.arguments = [];
+  while (tokens.current().token !== Token.RightParen) {
+    functionCall.arguments.push(
+      parseExpression(functionDefinition.parameterList[functionCall.arguments.length].variableType)
+    );
+    if (tokens.current().token === Token.Comma) tokens.advance();
   }
 
-  function parseFunctionCall() {
-    const functionCall = {
-      module: parseModuleIdentifier(),
-      identifier: parseIdentifier(),
-      arguments: []
-    };
+  tokens.advance(Token.RightParen);
 
-    functionCall.type = functionCall.module ? Type.ImportFunctionCall : Type.FunctionCall;
+  functionCall.elementType = functionCall.nameSpace ? Type.ImportFunctionCall : Type.FunctionCall;
 
-    if (functionCall.type === Type.FunctionCall) addFunctionReference(functionCall.identifier);
+  return functionCall;
+}
 
-    advance(Token.LeftParen);
+function parseFunctionDefinition() {
+  //  FunctionDefinition ==> ExportFlag IDENTIFIER ( ParameterList ) ReturnType CodeBlock
 
-    while (currentToken.token !== Token.RightParen) {
-      functionCall.arguments.push(parseExpression());
-      if (currentToken.token === Token.Comma) advance();
-    }
+  const definition = {
+    elementType: Type.FunctionDefinition,
+    export: parseFlag(Token.Keyword, "export"),
+    identifier: parseIdentifier()
+  };
 
-    advance(Token.RightParen);
+  currentBlock = 0;
+  nextBlock = 1;
 
-    return functionCall;
+  currentFunction = definition.identifier;
+
+  symbolTable.addLocalBlock(currentFunction, -1);
+
+  tokens.advance(Token.LeftParen);
+
+  // ParameterList => Paramter ParameterList'
+  // ParameterList' => , Parameter ParameterList'
+  definition.parameterList = [];
+  while (tokens.current().token !== Token.RightParen) {
+    const parameter = parseParameter();
+    symbolTable.addLocalVariable(
+      currentFunction,
+      currentBlock,
+      parameter.identifier,
+      parameter.variableType
+    );
+    definition.parameterList.push(parameter);
+    if (tokens.current().token === Token.Comma) tokens.advance();
   }
 
-  function parseFunctionReturn() {
-    try {
-      advance(Token.Colon);
-    } catch (e) {
-      return [];
-    }
+  tokens.advance(Token.RightParen);
 
-    return [parseVariableType()];
-  }
+  definition.returnType = parseReturnType();
 
-  function parseIdentifier() {
-    if (currentToken.token !== Token.Identifier)
-      throw unexpectedToken(currentToken, Token.Identifier);
+  definition.codeBlock = parseCodeBlock(currentBlock);
 
-    const identifier = currentToken.lexeme;
-    advance();
+  return definition;
+}
+
+function parseGlobalVariableDefinition() {
+  // GlobalVariableDefinition ==> ConstantFlag VariableDefinition
+  return {
+    constant: parseFlag(Token.Keyword, "constant"),
+    ...parseVariableDefinition()
+  };
+}
+
+function parseIdentifier() {
+  // Identifier ==> [a-zA-Z_][a-zA-Z0-9_]*
+  if (tokens.current().token !== Token.Identifier) throw tokens.unexpected(Token.Identifier);
+
+  const identifier = tokens.current().lexeme;
+  tokens.advance();
+
+  return identifier;
+}
+
+function parseNameSpace() {
+  // ModuleIdentifier ==> Identifier .
+  if (tokens.current().token === Token.Identifier && tokens.next().token === Token.Period) {
+    const identifier = parseIdentifier();
+    tokens.advance(Token.Period);
 
     return identifier;
   }
 
-  function parseModuleIdentifier() {
-    if (currentToken.token === Token.Identifier && nextToken.token === Token.Period) {
-      const identifier = parseIdentifier();
-      advance(Token.Period);
+  return null;
+}
 
-      return identifier;
-    }
+function parseNumber() {
+  // Number ==> (\d+\.?\d*)|(\.\d+)
+  if (tokens.current().token !== Token.Number) throw tokens.unexpected(Token.Number);
 
+  const number = parseFloat(tokens.current().lexeme);
+  tokens.advance();
+
+  return number;
+}
+
+function parseNumericExpression() {
+  // NumericExpression ==> Term NumericExpression'
+  const expression = [...parseTerm()]; // Term
+
+  // NumericExpression' ==> SumOp Term NumericExpression'
+  while (tokens.current().token === Token.SumOp) {
+    const operator = tokens.current().lexeme; // SumOp
+    tokens.advance();
+    expression.push(...parseTerm()); // Term
+    expression.push({
+      elementType: Type.NumericOperator,
+      operator
+    });
+  }
+
+  return expression;
+}
+
+function parseParameter() {
+  // Parameter ==> VariableType Identifier
+  return {
+    variableType: parseVariableType(),
+    identifier: parseIdentifier()
+  };
+}
+
+function parseProgramStatement() {
+  //  ProgramStatement ==> FunctionDefinition
+  //                     | GlobalVariableDefinition ;
+
+  const current = tokens.current();
+  let statement = null;
+
+  switch (current.token) {
+    case Token.Keyword:
+      switch (current.lexeme) {
+        case "constant": // GlobalVariableDefinition ;
+          statement = parseGlobalVariableDefinition();
+          tokens.advance(Token.Semicolon);
+          return statement;
+
+        case "export": // FunctionDefinition
+          return parseFunctionDefinition();
+
+        default:
+          throw tokens.unexpected();
+      }
+
+    case Token.Identifier: // FunctionDefinition
+      return parseFunctionDefinition();
+
+    case Token.VariableTypeKeyword: // GlobalVariableDefinition ;
+      statement = parseGlobalVariableDefinition();
+      tokens.advance(Token.Semicolon);
+      return statement;
+
+    default:
+      // Unexpected token
+      throw tokens.unexpected();
+  }
+}
+
+function parseReturnType() {
+  // ReturnType ==> : VariableType
+  //              | null
+  try {
+    tokens.advance(Token.Colon);
+  } catch (e) {
     return null;
   }
 
-  function parseNumber() {
-    if (currentToken.token !== Token.Number) throw unexpectedToken(currentToken, Token.Number);
+  return parseVariableType();
+}
 
-    const number = parseFloat(currentToken.lexeme);
-    advance();
+function parseTerm() {
+  // Term ==> Factor Term'
+  const expression = [...parseFactor()]; // Factor
 
-    return number;
+  // Term' ==> MultOp Factor Term'
+  while (tokens.current().token === Token.MultOp) {
+    const operator = tokens.curren().lexeme; // MultOp
+    tokens.advance();
+    expression.push(...parseFactor()); // Factor
+    expression.push({
+      elementType: Type.NumericOperator,
+      operator
+    });
   }
 
-  function parseNumericExpression() {
-    const expression = [...parseTerm()];
+  return expression;
+}
 
-    while (currentToken.token === Token.SumOp) {
-      const operator = currentToken.lexeme;
-      advance();
-      expression.push(...parseTerm());
-      expression.push({
-        type: Type.NumericOperator,
-        operator
-      });
-    }
-
-    return expression;
-  }
-
-  function parseParameter() {
-    return {
-      type: parseVariableType(),
-      identifier: parseIdentifier()
-    };
-  }
-
-  function parseProgramStatement() {
-    if (currentToken.token === Token.Keyword) {
-      if (currentToken.lexeme === "constant") {
-        const statement = parseVariableDefinitionStatement(true);
-        advance(Token.Semicolon);
-
-        return statement;
-      } else if (currentToken.lexeme === "export") {
-        return parseFunction();
-      }
-    } else if (currentToken.token === Token.Identifier) {
-      return parseFunction();
-    } else if (currentToken.token === Token.VariableTypeKeyword) {
-      const statement = parseVariableDefinitionStatement(true);
-      advance(Token.Semicolon);
-
-      return statement;
-    }
-
-    throw unexpectedToken(currentToken);
-  }
-
-  function parseTerm() {
-    const expression = [...parseFactor()];
-
-    while (currentToken.token === Token.MultOp) {
-      const operator = currentToken.lexeme;
-      advance();
-      expression.push(...parseFactor());
-      expression.push({
-        type: Type.NumericOperator,
-        operator
-      });
-    }
-
-    return expression;
-  }
-
-  function parseVariableAssignment() {
-    const assignment = {
-      type: Type.VariableAssignment,
-      identifier: parseIdentifier()
-    };
-
-    advance(Token.assignment);
-
-    assignment.expression = parseExpression();
-
-    return assignment;
-  }
-
-  function parseVariableDefinitionStatement(constant) {
-    return {
-      type: Type.VariableDefinition,
-      constant: parseConstantFlag() && constant,
-      variableType: parseVariableType(),
-      identifier: parseIdentifier(),
-      expression: parseAssignment()
-    };
-  }
-
-  function parseVariableType() {
-    if (currentToken.token !== Token.VariableTypeKeyword)
-      throw unexpectedToken(currentToken, Token.VariableTypeKeyword);
-
-    if (currentToken.lexeme === "number") {
-      advance();
-      return Type.NumberType;
-    }
-
-    throw unexpectedToken(currentToken);
-  }
-
-  const functionSignatures = [];
-
-  const functionImports = [
-    {
-      module: "system",
-      identifier: "output",
-      signature: functionSignatureIndex([Wasm.ValueType.f32], null)
-    }
-  ];
-
-  const functionIndex = {};
-
-  const ast = [];
-
-  const tokenIterator = tokens[Symbol.iterator]();
-  let currentToken = tokenIterator.next().value;
-  let nextToken = tokenIterator.next().value;
-
-  while (currentToken) {
-    ast.push(parseProgramStatement());
-  }
-
-  const undefinedFunctions = Object.entries(functionIndex).filter(([_, value]) => value.index < 0);
-  if (undefinedFunctions.length > 0)
-    throw new ParserError(
-      `Undefined function ${undefinedFunctions[0][0]} called on line ${-undefinedFunctions[0][1]}`
-    );
-
-  return {
-    functionIndex,
-    functionSignatures,
-    functionImports,
-    ast
+function parseVariableAssignment() {
+  // VariableAssignment ==> Identifier = Expression
+  const assignment = {
+    elementType: Type.VariableAssignment,
+    block: currentBlock,
+    identifier: parseIdentifier()
   };
+
+  const variable = symbolTable.getVariable(currentFunction, currentBlock, assignment.identifier);
+  if (variable.scope === "global" && variable.constant)
+    throw new Error(`Cannot assign new value to global constant ${variable.identifier}`);
+
+  tokens.advance(Token.assignment);
+
+  assignment.expression = parseExpression(variable.variableType);
+
+  return assignment;
+}
+
+function parseVariableDefinition() {
+  // VariableDefinition ==> Variable_Type Identifier
+  const variable = {
+    elementType: Type.VariableDefinition,
+    block: currentBlock,
+    variableType: parseVariableType(),
+    identifier: parseIdentifier()
+  };
+
+  variable.expression = parseAssignment(variable.variableType);
+
+  return variable;
+}
+
+function parseVariableType() {
+  // Variable_Type ==> boolean
+  //                 | number
+  if (tokens.current().token !== Token.VariableTypeKeyword)
+    throw tokens.unexpected(Token.VariableTypeKeyword);
+
+  switch (tokens.current().lexeme) {
+    case "boolean":
+      tokens.advance();
+      return Type.BooleanType;
+
+    case "number":
+      tokens.advance();
+      return Type.NumberType;
+
+    default:
+      throw tokens.unexpected();
+  }
+}
+
+//
+// Symbol Parsing Statements
+//
+
+function symbolParseProgramStatement() {
+  const current = tokens.current();
+
+  switch (current.token) {
+    case Token.Keyword:
+      switch (current.lexeme) {
+        case "constant": // global variable
+          symbolParseGlobalVariable();
+          return;
+
+        case "export": // function
+          symbolParseFunction();
+          return;
+
+        default:
+          throw tokens.unexpected();
+      }
+
+    case Token.Identifier: // function
+      symbolParseFunction();
+      return;
+
+    case Token.VariableTypeKeyword: // global variable
+      symbolParseGlobalVariable();
+      return;
+
+    default:
+      // Unexpected token
+      throw tokens.unexpected();
+  }
+}
+
+function symbolParseFunction() {
+  parseFlag(Token.Keyword, "export");
+
+  const identifier = parseIdentifier();
+
+  tokens.advance(Token.LeftParen);
+
+  const parameterList = [];
+  while (tokens.current().token !== Token.RightParen) {
+    parameterList.push(parseParameter());
+    if (tokens.current().token === Token.Comma) tokens.advance();
+  }
+
+  tokens.advance(Token.RightParen);
+
+  const returnType = parseReturnType();
+
+  symbolTable.addFunction(identifier, parameterList, returnType);
+
+  tokens.advance(Token.LeftBrace);
+  let braceCount = 1;
+
+  while (braceCount > 0) {
+    switch (tokens.current().token) {
+      case Token.LeftBrace:
+        braceCount++;
+        break;
+
+      case Token.RightBrace:
+        braceCount--;
+        break;
+
+      default:
+        break;
+    }
+
+    tokens.advance();
+  }
+}
+
+function symbolParseGlobalVariable() {
+  const constant = parseFlag(Token.Keyword, "constant");
+  const variableType = parseVariableType();
+  const identifier = parseIdentifier();
+
+  while (tokens.current().token !== Token.Semicolon) {
+    tokens.advance();
+  }
+
+  symbolTable.addGlobalVariable(identifier, constant, variableType);
+
+  tokens.advance(Token.Semicolon);
 }

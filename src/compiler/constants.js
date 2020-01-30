@@ -1,18 +1,23 @@
 // Keywords
-export const Keyword = Object.freeze(["constant", "export", "return"]);
-export const VariableTypeKeyword = Object.freeze(["number"]);
+export const BooleanKeyword = Object.freeze(["true", "false"]);
+export const Keyword = Object.freeze(["constant", "export", "return", "if", "else"]);
+export const VariableTypeKeyword = Object.freeze(["boolean", "number"]);
 
 // For debugging purposes, the Token and Type objects are mapped to strings
 // In the future, this may be changed over to numerics
 export const Token = Object.freeze({
   Assignment: "assignment",
+  BooleanKeyword: "booleanKeyword",
+  BooleanOp: "booleanOp",
   Colon: "colon",
   Comment: "comment",
+  ComparisonOp: "comparisonOp",
   Identifier: "identifier",
   Keyword: "keyword",
   LeftBrace: "leftBrace",
   LeftParen: "leftParen",
   MultOp: "multOp",
+  NegationOp: "negationOp",
   Number: "number",
   Period: "period",
   RightBrace: "rightBrace",
@@ -21,6 +26,26 @@ export const Token = Object.freeze({
   SumOp: "sumOp",
   VariableTypeKeyword: "variableTypeKeyword",
   Whitespace: "whitespace"
+});
+
+export const Type = Object.freeze({
+  BooleanConstant: "booleanConstant",
+  BooleanExpression: "booleanExpression",
+  BooleanOperator: "booleanOperator",
+  BooleanType: "booleanType",
+  ComparisonOperator: "comparisonOperator",
+  FunctionDefinition: "functionDefinition",
+  FunctionCall: "functionCall",
+  IfStatement: "ifStatement",
+  ImportFunctionCall: "importFunctionCall",
+  NumberType: "numberType",
+  NumericConstant: "numericConstant",
+  NumericExpression: "numericExpression",
+  NumericOperator: "numericOperator",
+  ReturnStatement: "returnStatement",
+  Variable: "variable",
+  VariableAssignment: "variableAssignment",
+  VariableDefinition: "variableDefinition"
 });
 
 export const Wasm = Object.freeze({
@@ -33,6 +58,8 @@ export const Wasm = Object.freeze({
     Global: 0x03
   },
   OpCode: {
+    if: 0x04,
+    else: 0x05,
     end: 0x0b,
     call: 0x10,
     return: 0x0f,
@@ -45,6 +72,15 @@ export const Wasm = Object.freeze({
     i64: 0x42,
     f32: 0x43,
     f64: 0x44,
+    i32eqz: 0x45,
+    f32eq: 0x5b,
+    f32ne: 0x5c,
+    f32lt: 0x5d,
+    f32gt: 0x5e,
+    f32le: 0x5f,
+    f32ge: 0x60,
+    i32and: 0x71,
+    i32or: 0x72,
     f32Add: 0x92,
     f32Sub: 0x93,
     f32Mul: 0x94,
@@ -67,24 +103,11 @@ export const Wasm = Object.freeze({
   ValueType: {
     constant: 0x00,
     var: 0x01,
+    block: 0x40,
     i32: 0x7f,
     i64: 0x7e,
     f32: 0x7d,
     f64: 0x7c
   },
   Version: [0x01, 0x00, 0x00, 0x00]
-});
-
-export const Type = Object.freeze({
-  Function: "function",
-  FunctionCall: "functionCall",
-  ImportFunctionCall: "importFunctionCall",
-  NumberType: Wasm.ValueType.f32,
-  NumericExpression: "numericExpression",
-  NumericConstant: "numericConstant",
-  NumericOperator: "numericOperator",
-  ReturnStatement: "returnStatement",
-  Variable: "variable",
-  VariableAssignment: "variableAssignment",
-  VariableDefinition: "variableDefinition"
 });

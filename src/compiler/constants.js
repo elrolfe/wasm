@@ -1,6 +1,17 @@
 // Keywords
 export const BooleanKeyword = Object.freeze(["true", "false"]);
-export const Keyword = Object.freeze(["constant", "export", "return", "if", "else"]);
+export const Keyword = Object.freeze([
+  "constant",
+  "do",
+  "else",
+  "export",
+  "for",
+  "if",
+  "in",
+  "return",
+  "step",
+  "while"
+]);
 export const VariableTypeKeyword = Object.freeze(["boolean", "number"]);
 
 // For debugging purposes, the Token and Type objects are mapped to strings
@@ -20,6 +31,7 @@ export const Token = Object.freeze({
   NegationOp: "negationOp",
   Number: "number",
   Period: "period",
+  RangeOp: "..",
   RightBrace: "rightBrace",
   RightParen: "rightParen",
   Semicolon: "semicolon",
@@ -34,6 +46,7 @@ export const Type = Object.freeze({
   BooleanOperator: "booleanOperator",
   BooleanType: "booleanType",
   ComparisonOperator: "comparisonOperator",
+  ForLoop: "forLoop",
   FunctionDefinition: "functionDefinition",
   FunctionCall: "functionCall",
   IfStatement: "ifStatement",
@@ -42,10 +55,12 @@ export const Type = Object.freeze({
   NumericConstant: "numericConstant",
   NumericExpression: "numericExpression",
   NumericOperator: "numericOperator",
+  NumericSign: "numericSign",
   ReturnStatement: "returnStatement",
   Variable: "variable",
   VariableAssignment: "variableAssignment",
-  VariableDefinition: "variableDefinition"
+  VariableDefinition: "variableDefinition",
+  WhileLoop: "whileLoop"
 });
 
 export const Wasm = Object.freeze({
@@ -58,9 +73,13 @@ export const Wasm = Object.freeze({
     Global: 0x03
   },
   OpCode: {
+    block: 0x02,
+    loop: 0x03,
     if: 0x04,
     else: 0x05,
     end: 0x0b,
+    br: 0x0c,
+    brIf: 0x0d,
     call: 0x10,
     return: 0x0f,
     localGet: 0x20,

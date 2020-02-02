@@ -1,7 +1,5 @@
 import { Token, Type } from "./constants";
-import { encodeFunctionSignature } from "./encodings";
 import { SymbolTable } from "./symbols";
-import { arraysEqual } from "./utility";
 
 let currentBlock, nextBlock;
 let currentFunction;
@@ -52,11 +50,70 @@ function parseBlockStatement() {
   //                  | VariableAssignment ;
   //                  | return Expression ;
   //                  | if ( BooleanExpression ) CodeBlock ElseBlock
+  //                  | while ( BooleanExpression ) CodeBlock
   let statement;
 
   switch (tokens.current().token) {
     case Token.Keyword:
       switch (tokens.current().lexeme) {
+        case "do": // do CodeBlock while ( BooleanExpression ) ;
+          tokens.advance();
+
+          statement = {
+            elementType: Type.WhileLoop,
+            doWhile: true,
+            codeBlock: parseCodeBlock(currentBlock)
+          };
+
+          tokens.advance(Token.Keyword, "while");
+          tokens.advance(Token.LeftParen);
+
+          statement.expression = parseBooleanExpression();
+
+          tokens.advance(Token.RightParen);
+          tokens.advance(Token.Semicolon);
+
+          return statement;
+
+        case "for": // for ( IDENTIFIER in NumericExpression .. NumericExpression StepValue ) CodeBlock
+          tokens.advance();
+          tokens.advance(Token.LeftParen);
+
+          const lastBlock = currentBlock;
+          currentBlock = nextBlock++;
+
+          symbolTable.addLocalBlock(currentFunction, lastBlock);
+
+          statement = {
+            elementType: Type.ForLoop,
+            variableType: Type.NumberType,
+            identifier: parseIdentifier(),
+            block: currentBlock
+          };
+
+          symbolTable.addLocalVariable(
+            currentFunction,
+            statement.block,
+            statement.identifier,
+            statement.variableType
+          );
+
+          tokens.advance(Token.Keyword, "in");
+
+          statement.expression = { expression: parseNumericExpression() };
+
+          tokens.advance(Token.RangeOp);
+
+          statement.endExpression = { expression: parseNumericExpression() };
+          statement.stepExpression = { expression: parseStepValue() };
+
+          tokens.advance(Token.RightParen);
+
+          statement.codeBlock = parseCodeBlock(currentBlock);
+
+          currentBlock = lastBlock;
+          return statement;
+
         case "if": // if ( BooleanExpression ) CodeBlock ElseBlock
           tokens.advance();
           tokens.advance(Token.LeftParen);
@@ -84,7 +141,21 @@ function parseBlockStatement() {
 
           return statement;
 
-        // case "if":  // if ( BooleanExpression ) CodeBlock ElseBlock
+        case "while": // while ( BooleanExpression ) CodeBlock
+          tokens.advance();
+          tokens.advance(Token.LeftParen);
+
+          statement = {
+            elementType: Type.WhileLoop,
+            doWhile: false,
+            expression: parseBooleanExpression()
+          };
+
+          tokens.advance(Token.RightParen);
+
+          statement.codeBlock = parseCodeBlock(currentBlock);
+
+          return statement;
 
         default:
           throw tokens.unexpected(Token.Keyword);
@@ -566,15 +637,47 @@ function parseReturnType() {
   return parseVariableType();
 }
 
-function parseTerm() {
-  // Term ==> Factor Term'
-  const expression = [...parseFactor()]; // Factor
+function parseSign() {
+  // Sign ==> SignFlag Factor
+  const sign = parseSignFlag();
+  const expression = [...parseFactor()];
 
-  // Term' ==> MultOp Factor Term'
+  if (sign === "-")
+    expression.push({
+      elementType: Type.NumericSign
+    });
+
+  return expression;
+}
+
+function parseSignFlag() {
+  try {
+    const token = tokens.advance(Token.SumOp);
+    return token.lexeme;
+  } catch (err) {
+    return "+";
+  }
+}
+
+function parseStepValue() {
+  try {
+    tokens.advance(Token.Keyword, "step");
+  } catch (e) {
+    return null;
+  }
+
+  return parseNumericExpression();
+}
+
+function parseTerm() {
+  // Term ==> Sign Term'
+  const expression = [...parseSign()]; // Factor
+
+  // Term' ==> MultOp Sign Term'
   while (tokens.current().token === Token.MultOp) {
-    const operator = tokens.curren().lexeme; // MultOp
+    const operator = tokens.current().lexeme; // MultOp
     tokens.advance();
-    expression.push(...parseFactor()); // Factor
+    expression.push(...parseSign()); // Factor
     expression.push({
       elementType: Type.NumericOperator,
       operator

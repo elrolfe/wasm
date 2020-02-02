@@ -52,6 +52,9 @@ function generateCode(element) {
 function generateCodeBlock(element) {
   return element.flatMap(statement => {
     switch (statement.elementType) {
+      case Type.ForLoop:
+        return generateForLoop(statement);
+
       case Type.FunctionCall:
         return generateFunctionCall(statement);
 
@@ -69,6 +72,9 @@ function generateCodeBlock(element) {
 
       case Type.VariableAssignment:
         return generateVariableAssignment(statement);
+
+      case Type.WhileLoop:
+        return generateWhileLoop(statement);
 
       default:
         throw new Error(`Illegal statement type: ${statement.elementType}`);
@@ -148,6 +154,9 @@ function generateExpression(element) {
             throw new Error(`Unexpected operator: ${exp.operator}`);
         }
 
+      case Type.NumericSign:
+        return [Wasm.OpCode.f32, ...encodeFloat32(-1), Wasm.OpCode.f32Mul];
+
       case Type.Variable:
         const variable = symbols.getVariable(currentFunction, exp.block, exp.identifier);
         return [
@@ -159,6 +168,38 @@ function generateExpression(element) {
         throw new Error(`Unexpected element in expression: ${exp.elementType}`);
     }
   });
+}
+
+function generateForLoop(element) {
+  const variable = symbols.getVariable(currentFunction, element.block, element.identifier);
+
+  return [
+    ...generateVariableDefinition(element), // Set the loop variable to the initial value
+    Wasm.OpCode.block, // Set the outer block
+    Wasm.ValueType.block,
+    Wasm.OpCode.loop, // Set the loop block
+    Wasm.ValueType.block,
+    ...generateCodeBlock(element.codeBlock), // Generate the loop code block
+    Wasm.OpCode.localGet, // Get the loop variable
+    ...encodeUInt(variable.index),
+    ...generateExpression(element.endExpression), // Get the end expression
+    Wasm.OpCode.f32ne, // Keep looping if the values are not equal
+    Wasm.OpCode.i32eqz,
+    Wasm.OpCode.brIf, // Break the loop if the values are equal
+    ...encodeUInt(1),
+    Wasm.OpCode.localGet, // Get the loop variable
+    ...encodeUInt(variable.index),
+    ...(element.stepExpression.expression // If a step expression is defined
+      ? generateExpression(element.stepExpression) // Use the step expression
+      : [Wasm.OpCode.f32, ...encodeFloat32(1)]), // otherwise use 1
+    Wasm.OpCode.f32Add, // Add the step value to the loop variable
+    Wasm.OpCode.localSet, // Store the result in the loop variable
+    ...encodeUInt(variable.index),
+    Wasm.OpCode.br, // Loop
+    ...encodeUInt(0),
+    Wasm.OpCode.end, // Loop end
+    Wasm.OpCode.end // Outer block end
+  ];
 }
 
 function generateFunctionCall(element) {
@@ -210,6 +251,31 @@ function generateVariableDefinition(element) {
         ...encodeUInt(variable.index)
       ]
     : [];
+}
+
+function generateWhileLoop(element) {
+  const loopCheck = [
+    ...generateExpression(element),
+    Wasm.OpCode.i32eqz,
+    Wasm.OpCode.brIf,
+    ...encodeUInt(1)
+  ];
+  const statement = [
+    Wasm.OpCode.block,
+    Wasm.ValueType.block,
+    Wasm.OpCode.loop,
+    Wasm.ValueType.block
+  ];
+
+  if (!element.doWhile) statement.push(...loopCheck);
+
+  statement.push(...generateCodeBlock(element.codeBlock));
+
+  if (element.doWhile) statement.push(...loopCheck);
+
+  statement.push(Wasm.OpCode.br, ...encodeUInt(0), Wasm.OpCode.end, Wasm.OpCode.end);
+
+  return statement;
 }
 
 export function generate({ ast, symbolTable }) {

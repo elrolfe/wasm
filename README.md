@@ -6,89 +6,96 @@ This is a React project to compile a custom language into a WebAssembly module. 
 
 The following grammar has been implemented to this point:
 
-|                 Production |        |                                                                                    |
-| -------------------------: | :----: | :--------------------------------------------------------------------------------- |
-|                  _Program_ |  ==>   | _ProgramStatement_ _Program_                                                       |
-|                            | &#124; | &#11401;                                                                           |
-|         _ProgramStatement_ |  ==>   | _FunctionDefinition_                                                               |
-|                            | &#124; | _GlobalVariableDefinition_ **;**                                                   |
-|       _FunctionDefinition_ |  ==>   | _ExportFlag_ **_IDENTIFIER_** **(** _ParameterList_ **)** _ReturnType_ _CodeBlock_ |
-|               _ExportFlag_ |  ==>   | **export**                                                                         |
-|                            | &#124; | &#11401;                                                                           |
-|            _ParameterList_ |  ==>   | _Parameter_ _ParameterList'_                                                       |
-|                            | &#124; | &#11401;                                                                           |
-|           _ParameterList'_ |  ==>   | **,** _Parameter_ _ParameterList'_                                                 |
-|                _Parameter_ |  ==>   | **_VARIABLE_TYPE_** **_IDENTIFIER_**                                               |
-|               _ReturnType_ |  ==>   | **:** **_VARIABLE_TYPE_**                                                          |
-|                            | &#124; | &#11401;                                                                           |
-|                _CodeBlock_ |  ==>   | **{** _BlockStatement_\* **}**                                                     |
-|           _BlockStatement_ |  ==>   | _FunctionCall_ **;**                                                               |
-|                            | &#124; | _VariableDefinition_ **;**                                                         |
-|                            | &#124; | _VariableAssignment_ **;**                                                         |
-|                            | &#124; | **return** _Expression_ **;**                                                      |
-|                            | &#124; | **if** **(** _BooleanExpression_ **)** _CodeBlock_ _ElseBlock_                     |
-|             _FunctionCall_ |  ==>   | _NameSpace_ **_IDENTIFIER_** **(** _ArgumentList_ **)**                            |
-|                _NameSpace_ |  ==>   | **_IDENTIFIER_ .**                                                                 |
-|                            | &#124; | &#11401;                                                                           |
-|             _ArgumentList_ |  ==>   | _Expression_ _ArgumentList'_                                                       |
-|                            | &#124; | &#11401;                                                                           |
-|            _ArgumentList'_ |  ==>   | **,** _Expression_ _ArgumentList'_                                                 |
-|                            | &#124; | &#11401;                                                                           |
-|               _Expression_ |  ==>   | _NumericExpression_                                                                |
-|                            | &#124; | _BooleanExpression_                                                                |
-|        _NumericExpression_ |  ==>   | _Term_ _NumericExpression'_                                                        |
-|       _NumericExpression'_ |  ==>   | **_SUM_OP_** _Term_ _NumericExpression'_                                           |
-|                            | &#124; | &#11401;                                                                           |
-|                     _Term_ |  ==>   | _Factor_ _Term'_                                                                   |
-|                    _Term'_ |  ==>   | **_MULT_OP_** _Factor_ _Term'_                                                     |
-|                            | &#124; | &#11401;                                                                           |
-|                   _Factor_ |  ==>   | _FunctionCall_                                                                     |
-|                            | &#124; | **_IDENTIFIER_**                                                                   |
-|                            | &#124; | **(** _NumericExpression_ **)**                                                    |
-|                            | &#124; | **_NUMBER_**                                                                       |
-|        _BooleanExpression_ |  ==>   | _BooleanTerm_ _BooleanExpression'_                                                 |
-|       _BooleanExpression'_ |  ==>   | **&#124;&#124;** _BooleanTerm_ _BooleanExpression'_                                |
-|                            | &#124; | &#11401;                                                                           |
-|              _BooleanTerm_ |  ==>   | _BooleanNegation_ _BooleanTerm'_                                                   |
-|             _BooleanTerm'_ |  ==>   | **&&** _BooleanNegation_ _BooleanTerm'_                                            |
-|                            | &#124; | &#11401;                                                                           |
-|          _BooleanNegation_ |  ==>   | _NegationFlag_ _BooleanFactor_                                                     |
-|             _NegationFlag_ |  ==>   | **!**                                                                              |
-|                            | &#124; | &#11401;                                                                           |
-|            _BooleanFactor_ |  ==>   | _FunctionCall_                                                                     |
-|                            | &#124; | **_IDENTIFIER_**                                                                   |
-|                            | &#124; | _ComparisonExpression_                                                             |
-|                            | &#124; | **(** _BooleanExpression_ **)**                                                    |
-|                            | &#124; | **_BOOLEAN_CONSTANT_**                                                             |
-|     _ComparisonExpression_ |  ==>   | _NumericExpression_ **_COMPARISON_OP_** _NumericExpression_                        |
-| _GlobalVariableDefinition_ |  ==>   | _ConstantFlag_ _VariableDefinition_                                                |
-|             _ConstantFlag_ |  ==>   | **constant**                                                                       |
-|                            | &#124; | &#11401;                                                                           |
-|       _VariableDefinition_ |  ==>   | **_VARIABLE_TYPE_** **_IDENTIFIER_** _Assignment_                                  |
-|               _Assignment_ |  ==>   | **=** _Expression_                                                                 |
-|                            | &#124; | &#11401;                                                                           |
-|       _VariableAssignment_ |  ==>   | **_IDENTIFIER_** **=** _Expression_                                                |
-|                _ElseBlock_ |  ==>   | **else** _CodeBlock_                                                               |
-|                            | &#124; | &#11401;                                                                           |
-|           **_IDENTIFIER_** |  ==>   | **/[a-zA-Z\_][a-za-z0-9\_]\*/**                                                    |
-|               **_SUM_OP_** |  ==>   | **+ &#124; -**                                                                     |
-|              **_MULT_OP_** |  ==>   | **\* &#124; /**                                                                    |
-|               **_NUMBER_** |  ==>   | **(\\d+\\.?\\d\*)&#124;(\\.\\d+)**                                                 |
-|        **_VARIABLE_TYPE_** |  ==>   | **boolean**                                                                        |
-|                            | &#124; | **number**                                                                         |
-|     **_BOOLEAN_CONSTANT_** |  ==>   | **true**                                                                           |
-|                            | &#124; | **false**                                                                          |
-|        **_COMPARISON_OP_** |  ==>   | **==**                                                                             |
-|                            | &#124; | **!=**                                                                             |
-|                            | &#124; | **>**                                                                              |
-|                            | &#124; | **>=**                                                                             |
-|                            | &#124; | **<**                                                                              |
-|                            | &#124; | **<=**                                                                             |
+|                 Production |        |                                                                                                                    |
+| -------------------------: | :----: | :----------------------------------------------------------------------------------------------------------------- |
+|                  _Program_ |  ==>   | _ProgramStatement_ _Program_                                                                                       |
+|                            | &#124; | &#11401;                                                                                                           |
+|         _ProgramStatement_ |  ==>   | _FunctionDefinition_                                                                                               |
+|                            | &#124; | _GlobalVariableDefinition_ **;**                                                                                   |
+|       _FunctionDefinition_ |  ==>   | _ExportFlag_ **_IDENTIFIER_** **(** _ParameterList_ **)** _ReturnType_ _CodeBlock_                                 |
+|               _ExportFlag_ |  ==>   | **export**                                                                                                         |
+|                            | &#124; | &#11401;                                                                                                           |
+|            _ParameterList_ |  ==>   | _Parameter_ _ParameterList'_                                                                                       |
+|                            | &#124; | &#11401;                                                                                                           |
+|           _ParameterList'_ |  ==>   | **,** _Parameter_ _ParameterList'_                                                                                 |
+|                _Parameter_ |  ==>   | **_VARIABLE_TYPE_** **_IDENTIFIER_**                                                                               |
+|               _ReturnType_ |  ==>   | **:** **_VARIABLE_TYPE_**                                                                                          |
+|                            | &#124; | &#11401;                                                                                                           |
+|                _CodeBlock_ |  ==>   | **{** _BlockStatement_\* **}**                                                                                     |
+|           _BlockStatement_ |  ==>   | _FunctionCall_ **;**                                                                                               |
+|                            | &#124; | _VariableDefinition_ **;**                                                                                         |
+|                            | &#124; | _VariableAssignment_ **;**                                                                                         |
+|                            | &#124; | **return** _Expression_ **;**                                                                                      |
+|                            | &#124; | **if** **(** _BooleanExpression_ **)** _CodeBlock_ _ElseBlock_                                                     |
+|                            | &#124; | **while** **(** _BooleanExpression_ **)** _CodeBlock_                                                              |
+|                            | &#124; | **do** _CodeBlock_ **while** **(** \_BooleanExpression **)** **;**                                                 |
+|                            | &#124; | **for** **(** **_IDENTIFIER_** **in** _NumericExpression_ **..** _NumericExpression_ _StepValue_ **)** _CodeBlock_ |
+|             _FunctionCall_ |  ==>   | _NameSpace_ **_IDENTIFIER_** **(** _ArgumentList_ **)**                                                            |
+|                _NameSpace_ |  ==>   | **_IDENTIFIER_ .**                                                                                                 |
+|                            | &#124; | &#11401;                                                                                                           |
+|             _ArgumentList_ |  ==>   | _Expression_ _ArgumentList'_                                                                                       |
+|                            | &#124; | &#11401;                                                                                                           |
+|            _ArgumentList'_ |  ==>   | **,** _Expression_ _ArgumentList'_                                                                                 |
+|                            | &#124; | &#11401;                                                                                                           |
+|               _Expression_ |  ==>   | _NumericExpression_                                                                                                |
+|                            | &#124; | _BooleanExpression_                                                                                                |
+|        _NumericExpression_ |  ==>   | _Term_ _NumericExpression'_                                                                                        |
+|       _NumericExpression'_ |  ==>   | **_SUM_OP_** _Term_ _NumericExpression'_                                                                           |
+|                            | &#124; | &#11401;                                                                                                           |
+|                     _Term_ |  ==>   | _Sign_ _Term'_                                                                                                     |
+|                    _Term'_ |  ==>   | **_MULT_OP_** _Sign_ _Term'_                                                                                       |
+|                            | &#124; | &#11401;                                                                                                           |
+|                     _Sign_ |  ==>   | _SignFlag_ _Factor_                                                                                                |
+|                 _SignFlag_ |  ==>   | **_SUM_OP_**                                                                                                       |
+|                            | &#124; | &#11401;                                                                                                           |
+|                   _Factor_ |  ==>   | _FunctionCall_                                                                                                     |
+|                            | &#124; | **_IDENTIFIER_**                                                                                                   |
+|                            | &#124; | **(** _NumericExpression_ **)**                                                                                    |
+|                            | &#124; | **_NUMBER_**                                                                                                       |
+|        _BooleanExpression_ |  ==>   | _BooleanTerm_ _BooleanExpression'_                                                                                 |
+|       _BooleanExpression'_ |  ==>   | **&#124;&#124;** _BooleanTerm_ _BooleanExpression'_                                                                |
+|                            | &#124; | &#11401;                                                                                                           |
+|              _BooleanTerm_ |  ==>   | _BooleanNegation_ _BooleanTerm'_                                                                                   |
+|             _BooleanTerm'_ |  ==>   | **&&** _BooleanNegation_ _BooleanTerm'_                                                                            |
+|                            | &#124; | &#11401;                                                                                                           |
+|          _BooleanNegation_ |  ==>   | _NegationFlag_ _BooleanFactor_                                                                                     |
+|             _NegationFlag_ |  ==>   | **!**                                                                                                              |
+|                            | &#124; | &#11401;                                                                                                           |
+|            _BooleanFactor_ |  ==>   | _FunctionCall_                                                                                                     |
+|                            | &#124; | **_IDENTIFIER_**                                                                                                   |
+|                            | &#124; | _ComparisonExpression_                                                                                             |
+|                            | &#124; | **(** _BooleanExpression_ **)**                                                                                    |
+|                            | &#124; | **_BOOLEAN_CONSTANT_**                                                                                             |
+|     _ComparisonExpression_ |  ==>   | _NumericExpression_ **_COMPARISON_OP_** _NumericExpression_                                                        |
+| _GlobalVariableDefinition_ |  ==>   | _ConstantFlag_ _VariableDefinition_                                                                                |
+|             _ConstantFlag_ |  ==>   | **constant**                                                                                                       |
+|                            | &#124; | &#11401;                                                                                                           |
+|       _VariableDefinition_ |  ==>   | **_VARIABLE_TYPE_** **_IDENTIFIER_** _Assignment_                                                                  |
+|               _Assignment_ |  ==>   | **=** _Expression_                                                                                                 |
+|                            | &#124; | &#11401;                                                                                                           |
+|       _VariableAssignment_ |  ==>   | **_IDENTIFIER_** **=** _Expression_                                                                                |
+|                _ElseBlock_ |  ==>   | **else** _CodeBlock_                                                                                               |
+|                            | &#124; | &#11401;                                                                                                           |
+|                _StepValue_ |  ==>   | **step** _NumericExpression_                                                                                       |
+|                            | &#124; | &#11401;                                                                                                           |
+|           **_IDENTIFIER_** |  ==>   | **/[a-zA-Z\_][a-za-z0-9\_]\*/**                                                                                    |
+|               **_SUM_OP_** |  ==>   | **+ &#124; -**                                                                                                     |
+|              **_MULT_OP_** |  ==>   | **\* &#124; /**                                                                                                    |
+|               **_NUMBER_** |  ==>   | **(\\d+\\.?\\d\*)&#124;(\\.\\d+)**                                                                                 |
+|        **_VARIABLE_TYPE_** |  ==>   | **boolean**                                                                                                        |
+|                            | &#124; | **number**                                                                                                         |
+|     **_BOOLEAN_CONSTANT_** |  ==>   | **true**                                                                                                           |
+|                            | &#124; | **false**                                                                                                          |
+|        **_COMPARISON_OP_** |  ==>   | **==**                                                                                                             |
+|                            | &#124; | **!=**                                                                                                             |
+|                            | &#124; | **>**                                                                                                              |
+|                            | &#124; | **>=**                                                                                                             |
+|                            | &#124; | **<**                                                                                                              |
+|                            | &#124; | **<=**                                                                                                             |
 
 The tokenizer will match the following tokens:
 
 - Assignment
-- BooleanConstant
 - BooleanKeyword
 - BooleanOp
 - Colon
@@ -102,6 +109,7 @@ The tokenizer will match the following tokens:
 - NegationOp
 - Number
 - Period
+- RangeOp
 - RightBrace
 - RightParen
 - Semicolon
@@ -113,13 +121,18 @@ Language Keywords:
 
 - `boolean`
 - `constant`
+- `do`
 - `else`
 - `export`
 - `false`
+- `for`
 - `if`
+- `in`
 - `number`
 - `return`
+- `step`
 - `true`
+- `while`
 
 If a function is defined with the `export` keyword, it will available to be called from the module in a JavaScript program.
 
@@ -157,3 +170,5 @@ or End of Line comments
 ```
 
 Global and local variables are supported. Global variables can be defined as immutable with the `constant` keyword, and an exception will be thrown if a subsequent assignment to a constant global is attempted. Function arguments are mutable, and arguments with the same name as global variables will take precedence over the globals. Local variables block scoped and are always mutable. They may have the same names as defined global variables, enclosing function arguments, or externally scoped local variables, and will take precedence over the item with the same name.
+
+While and Do-While loops work as in other languages, with the loop continuing while the boolean condition is true. For loops iterate from the start expression to the end expression inclusive. If a step expression is given, the loop variable will increment by the value of the step expression, otherwise it will increment by 1. Currently, the for loop relies on the loop variable being equal to the end expression to break the loop. If the step expression moves the loop variable beyond the end expression value, the loop will continue infinitely. Take care to ensure that any defined step will eventually cause the loop variable to equal the loop variable to equal the end expression.

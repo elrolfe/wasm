@@ -159,7 +159,7 @@ export class SymbolTable {
   }
 
   getVariable(func, block, identifier) {
-    try {
+    if (this.localVariables[func]) {
       const locals = this.localVariables[func].blocks;
 
       while (block !== -1) {
@@ -172,14 +172,14 @@ export class SymbolTable {
 
         block = locals[block].parent;
       }
-    } finally {
-      for (let i = 0; i < this.globalVariables.length; i++) {
-        if (this.globalVariables[i].identifier === identifier)
-          return {
-            scope: "global",
-            ...this.globalVariables[i]
-          };
-      }
+    }
+
+    for (let i = 0; i < this.globalVariables.length; i++) {
+      if (this.globalVariables[i].identifier === identifier)
+        return {
+          scope: "global",
+          ...this.globalVariables[i]
+        };
     }
 
     throw new Error(

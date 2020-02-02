@@ -189,7 +189,7 @@ function generateImportFunctionCall(element) {
 }
 
 function generateReturnStatement(element) {
-  if (element.expression) return generateExpression(element.expression);
+  if (element.expression) return [...generateExpression(element.expression), Wasm.OpCode.return];
 }
 
 function generateVariableAssignment(element) {
